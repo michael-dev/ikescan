@@ -316,7 +316,7 @@ class IKEv2WithEap:
 
     def sendAndRecv(self, pck):
         r = None
-        for i in range(10):
+        for i in range(3):
             self.sock.send(pck)
             try:
                 r = self.sock.recv()
