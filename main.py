@@ -64,13 +64,13 @@ def scan(host, port, identity, sni, logger):
 
     # 5. detect EAP-TLS version
     supportedTlsVersion = None
-    supportedCryptoAlg = [ algId for algId in supportedCryptoAlg if algId in IKEv2WithEap.supportedCryptoAlg() ]
-    if len(supportedCryptoAlg) == 0:
+    supportedCryptoAlgForIkeAuth = [ algId for algId in supportedCryptoAlg if algId in IKEv2WithEap.supportedCryptoAlg() ]
+    if len(supportedCryptoAlgForIkeAuth) == 0:
         logger("cannot test EAP - no supported crypto cipher found")
     else:
         supportedTlsVersion = []
         for tlsProto in TLSTester.supportedProtos():
-            ret = testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlg, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)
+            ret = testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)
             if ret and "eapTlsVersion" in ret:
                 supportedTlsVersion.append(ret["eapTlsVersion"])
 
