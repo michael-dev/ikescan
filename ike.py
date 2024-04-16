@@ -76,6 +76,10 @@ class IKEv2WithEap:
 
         self.cookie = None
 
+    def __del__(self):
+        del(self.sock)
+        self.udpsock.close()
+
     def doSaInit(self):
         self.msgid = 0
 
