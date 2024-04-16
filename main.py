@@ -71,7 +71,7 @@ def scan(host, port, identity, sni, logger):
         supportedTlsVersion = []
         for tlsProto in TLSTester.supportedProtos():
             ret = testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)
-            if ret and "eapTlsVersion" in ret:
+            if ret and "eapTlsVersion" in ret and ret["eapTlsVersion"]:
                 supportedTlsVersion.append(ret["eapTlsVersion"])
 
     logger(f"supported tls version: {supportedTlsVersion}")
