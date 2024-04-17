@@ -90,7 +90,7 @@ async def scan(host, port, identity, sni, logger, restrictDh = None, restrictCry
         for tlsProto in TLSTester.supportedProtos():
             if restrictTls and tlsProto not in restrictTls:
                 continue
-            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = lambda msg, tlsProto=tlsProto: logger(f"TLS({tlsProto}): {msg}"))))
+            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = lambda msg, tlsProto=tlsProto: logger(f"TLS({tlsProto}): {msg}"), loadDebug = f"{tlsProto}.json")))
         supportedTlsVersion = set()
         for f in asyncio.as_completed(taskList):
             ret = await f
@@ -118,6 +118,7 @@ async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = No
 
     debug = Debug(logger)
     if loadDebug and os.path.isfile(loadDebug):
+        logger("successfully loaded from debug file")
         async with aiofiles.open(loadDebug, mode='r') as f:
             content = await f.read()
         debug.fromJson(content)

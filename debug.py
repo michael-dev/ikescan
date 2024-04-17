@@ -51,6 +51,8 @@ class Debug:
             return False
         else:
             assert(self.debugTrace[key] == valueToStore)
+            if self.logger:
+                self.logger(f"DEBUG: checking {key} was successfull")
             return True
 
     def setOrGet(self, key, value, valueType='byte.hex', noneIfNew = False):
