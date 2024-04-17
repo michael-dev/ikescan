@@ -74,6 +74,7 @@ async def scan(host, port, identity, sni, logger):
     if len(supportedCryptoAlgForIkeAuth) == 0:
         logger("cannot test EAP - no supported crypto cipher found")
     else:
+        logger(f"testing EAP-TLS with identity={identity} and servername={sni} and tlsVersion={TLSTester.supportedProtos()}")
         taskList = []
         for tlsProto in TLSTester.supportedProtos():
             taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)))
@@ -83,7 +84,7 @@ async def scan(host, port, identity, sni, logger):
             if ret and "eapTlsVersion" in ret and ret["eapTlsVersion"]:
                 supportedTlsVersion.add(ret["eapTlsVersion"])
 
-    logger(f"supported tls version: {supportedTlsVersion}")
+    logger(f"supported tls version: {list(supportedTlsVersion)}")
 
     ret = {
         "host": host,
@@ -107,7 +108,7 @@ async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = No
     else:
         eapHandler = None
 
-    ikeHandler = IKEv2WithEap(eapHandler, host, port, cryptoAlg, prfAlg, authAlg, dhAlg, identity, None) # optionally pass debugRandom
+    ikeHandler = IKEv2WithEap(eapHandler, host, port, cryptoAlg, prfAlg, authAlg, dhAlg, identity, None, logger = logger) # optionally pass debugRandom
 
     try:
         await ikeHandler.doSaInit()
@@ -132,14 +133,18 @@ async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = No
                 "eapTlsVersion": tlsHandler.selectedVersion,
                 "eapTlsProto": tlsHandler.selectedProto
             })
+    except IKEv2NoAnswerException as ex:
+        logger(f"IKEv2 INIT Error: {ex}")
+        logger(str(ex) + "\n" + "\n".join(traceback.format_exception(ex)))
+        raise ex
     except IKEv2UnsupportedByServer:
         return False
     except IKEv2Exception as ex:
         logger(f"IKEv2 INIT Error: {ex}")
         logger(str(ex) + "\n" + "\n".join(traceback.format_exception(ex)))
         return False
-
-    del(ikeHandler)
+    finally:
+        del(ikeHandler)
 
     return result
 
