@@ -74,10 +74,10 @@ async def scan(host, port, identity, sni, logger):
     if len(supportedCryptoAlgForIkeAuth) == 0:
         logger("cannot test EAP - no supported crypto cipher found")
     else:
-        logger(f"testing EAP-TLS with identity={identity} and servername={sni} and tlsVersion={TLSTester.supportedProtos()}")
+        logger(f"testing EAP-TLS with identity={identity} and servername={sni} and tlsVersion={TLSTester.supportedProtos()} and cryptoAlg={supportedCryptoAlgForIkeAuth}")
         taskList = []
         for tlsProto in TLSTester.supportedProtos():
-            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)))
+            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = lambda msg: logger(f"TLS({tlsProto}): {msg}"))))
         supportedTlsVersion = set()
         for f in asyncio.as_completed(taskList):
             ret = await f
