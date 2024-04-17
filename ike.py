@@ -367,6 +367,7 @@ class IKEv2WithEap:
                     continue # just ignore it
                 break
             except TimeoutError as ex:
+                self.logger("timeout, retransmitting")
                 pass
         if r is None:
             raise IKEv2NoAnswerException("no answer")
