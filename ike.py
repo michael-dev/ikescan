@@ -196,10 +196,10 @@ class IKEv2WithEap:
         self.peer_spi = rxMsg.resp_SPI
 
     async def doSaAuth(self):
+        self.logger(f"SA AUTH: starting with crypto={self.chosenCryptoAlg} ({self.chosenCryptoKeyLength}), prf={self.chosenPrfAlg}, auth={self.chosenAuthAlg}, dh={self.chosenDhAlg}")
         # generate IKE SA key material
         self.generate_ike_sa_key_material()
    
-        exit
         # send AUTH_REQUEST
         self.logger(f"SA AUTH: identity={self.identity}")
         payload_idi = IKEv2_IDi(IDtype="Email_addr", ID=self.identity)
