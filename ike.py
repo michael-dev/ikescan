@@ -333,7 +333,9 @@ class IKEv2WithEap:
     async def sendAndRecv(self, pck):
         if self.debug.setOrCheck(f"out{self.msgid}", bytes(pck)):
             self.logger("fake result from peer")
-            r = self.getDebug(f"in{self.msgid}")
+            r = self.debug.getOrDefault(f"in{self.msgid}")
+            if r is None:
+                raise IKEv2NoAnswerException("no answer")
             self.msgid = self.msgid + 1
             return IKEv2(r)
 

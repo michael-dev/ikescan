@@ -9,6 +9,9 @@ class Debug:
     def toJson(self):
         return json.dumps(self.debugTrace)
 
+    def fromJson(self, data):
+        self.debugTrace = json.loads(data)
+
     def valueToStore(self, value, valueType):
         if valueType == 'byte.hex':
             if value is None:
@@ -32,7 +35,7 @@ class Debug:
             else:
                 return bytes.fromhex(valueFromStore)
         elif valueType == 'byte.utf8':
-            return self.valueFromStore.encode('utf-8')
+            return valueFromStore.encode('utf-8')
         elif valueType == 'int':
             if valueFromStore == 'None':
                 return None
@@ -59,4 +62,10 @@ class Debug:
 
     def get(self, key, valueType='byte.hex'):
         return self.valueFromStore(valueFromStore=self.debugTrace[key], valueType=valueType)
+    
+    def getOrDefault(self, key, valueType='byte.hex', defaultValue = None):
+        if key in self.debugTrace:
+            return self.valueFromStore(valueFromStore=self.debugTrace[key], valueType=valueType)
+        else:
+            return defaultValue
 

@@ -3,8 +3,10 @@ from eap import EapWithTls
 from ike import IKEv2WithEap, IKEv2Exception, IKEv2UnsupportedByServer, IKEv2NoEapPayloadException, IKEv2NoAnswerException
 from tls import TLSTester
 
+import aiofiles
 import asyncio
 import json
+import os
 import traceback
 
 def main():
@@ -18,7 +20,7 @@ def main():
 
     print(json.dumps(ret))
 
-async def scan(host, port, identity, sni, logger, restrictDh = None, restrictCrypto = None, restrictPrf = None, restrictAuth = None):
+async def scan(host, port, identity, sni, logger, restrictDh = None, restrictCrypto = None, restrictPrf = None, restrictAuth = None, restrictTls = None):
     logger('Scanning IKEv2')
 
     # 1. detect diffie-hellmann   
@@ -86,6 +88,8 @@ async def scan(host, port, identity, sni, logger, restrictDh = None, restrictCry
         logger(f"testing EAP-TLS with identity={identity} and servername={sni} and tlsVersion={TLSTester.supportedProtos()} and cryptoAlg={supportedCryptoAlgForIkeAuth}")
         taskList = []
         for tlsProto in TLSTester.supportedProtos():
+            if restrictTls and tlsProto not in restrictTls:
+                continue
             taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = lambda msg, tlsProto=tlsProto: logger(f"TLS({tlsProto}): {msg}"))))
         supportedTlsVersion = set()
         for f in asyncio.as_completed(taskList):
@@ -109,10 +113,14 @@ async def scan(host, port, identity, sni, logger, restrictDh = None, restrictCry
     return ret
 
 
-async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, servername = None, tlsVersion = None, logger = lambda msg: print(msg)):
-    logger(f"testProto({host}:{port}, dh={dhAlg}, crypto={cryptoAlg}, prf={prfAlg}, auth={authAlg}, identity={identity}, servername={servername}, tlsVersion={tlsVersion})")
+async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, servername = None, tlsVersion = None, logger = lambda msg: print(msg), loadDebug = None, writeDebug = None):
+    logger(f"testProto({host}:{port}, dh={dhAlg}, crypto={cryptoAlg}, prf={prfAlg}, auth={authAlg}, identity={identity}, servername={servername}, tlsVersion={tlsVersion}, loadDebug = {loadDebug})")
 
     debug = Debug(logger)
+    if loadDebug and os.path.isfile(loadDebug):
+        async with aiofiles.open(loadDebug, mode='r') as f:
+            content = await f.read()
+        debug.fromJson(content)
 
     if identity is not None:
         tlsHandler = TLSTester(proto=tlsVersion,servername=servername,debug=debug)
@@ -156,7 +164,11 @@ async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = No
         logger(str(ex) + "\n" + "\n".join(traceback.format_exception(ex)))
         return False
     finally:
-        logger(f"testProto debug output: {debug.toJson()}")
+        if writeDebug:
+            async with aiofiles.open(writeDebug, mode='w') as f:
+                f.write(debug.toJson())
+        else:
+            logger(f"testProto debug output: {debug.toJson()}")
         del(ikeHandler)
 
     return result
