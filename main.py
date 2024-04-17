@@ -14,8 +14,9 @@ def main():
     port = int( 500)
 
     identity = "michael.braun@kubus-it.de"
-    sni="kubus-it.de"
+    sni="vpn.kubus-it.de"
     
+    #ret = asyncio.run(scan(host, port, identity, sni, lambda msg: print(msg), restrictDh=[2], restrictCrypto=[12], restrictAuth=[2], restrictPrf=[2], restrictTls=["tls10"]), debug=False)
     ret = asyncio.run(scan(host, port, identity, sni, lambda msg: print(msg)), debug=False)
 
     print(json.dumps(ret))

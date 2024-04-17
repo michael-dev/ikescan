@@ -1,4 +1,5 @@
 import json
+#from scapy.contrib.ikev2 import *
 
 class Debug:
 
@@ -50,6 +51,16 @@ class Debug:
             self.debugTrace[key] = valueToStore
             return False
         else:
+            if self.debugTrace[key] != valueToStore and self.logger:
+                self.logger(f"{key} new value {valueToStore}")
+                #if key.startswith("out"):
+                #    orig = IKEv2(bytes.fromhex(self.debugTrace[key]))
+                #    new = IKEv2(bytes.fromhex(valueToStore))
+                #    print("orig:")
+                #    orig.show()
+                #    print("new:")
+                #    new.show()
+                #    print("end")
             assert(self.debugTrace[key] == valueToStore)
             if self.logger:
                 self.logger(f"DEBUG: checking {key} was successfull")
