@@ -26,6 +26,9 @@ class IKEv2UnsupportedByServer(IKEv2Exception):
 class IKEv2NoEapPayloadException(IKEv2Exception):
     pass
 
+class IKEv2NoAnswerException(IKEv2Exception):
+    pass
+
 class IKEv2WithEap:
     EXCH_SA_INIT = 34
     EXCH_AUTH = 35
@@ -46,8 +49,9 @@ class IKEv2WithEap:
     def algToText(cls, typeId, value):
         return IKEv2AttributeTypes[typeId][1][value]
 
-    def __init__(self, eapHandler, server = "vpn.example.org", port = 500, cryptoAlg = [ 12 ], prfAlg = [2], authAlg =[2], dhAlg =[2], identity = "example@example.org", debugRandom = None):
+    def __init__(self, eapHandler, server = "vpn.example.org", port = 500, cryptoAlg = [ 12 ], prfAlg = [2], authAlg =[2], dhAlg =[2], identity = "example@example.org", debugRandom = None, logger = lambda msg: print(msg)):
         self.debugRandom = debugRandom
+        self.logger = logger
         self.eapHandler = eapHandler
 
         self.udpsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -95,27 +99,27 @@ class IKEv2WithEap:
     
         pck = IKEv2(init_SPI=self.myspi, exch_type=self.EXCH_SA_INIT, flags = ["Initiator"], id = self.msgid )
         if self.cookie is not None:
-            #print('Adding cookie')
+            #self.logger('Adding cookie')
             pck = pck / self.cookie
         else:
-            #print('Without cookie')
+            #self.logger('Without cookie')
             pass
         pck = pck / IKEv2_SA(prop= IKEv2_Proposal(trans_nb = len(proposals), trans = proposals_layer ))
-        #print(self.dh)
+        #self.logger(self.dh)
         for id, dhv in self.dh.items():
-            #print(f"group = {dhv.group}, ke = {dhv.public_key.hex()}")
+            #self.logger(f"group = {dhv.group}, ke = {dhv.public_key.hex()}")
             if self.debugRandom is not None:
                 assert(dhv.group == self.debugRandom["dhGroup"])
                 assert(dhv.public_key.hex() == self.debugRandom["dhKe"])
             pck = pck / IKEv2_KE(group=dhv.group, ke = dhv.public_key)
         pck = pck / IKEv2_Nonce(nonce=self.nonce)
         
-        #print(f"sending: {bytes(pck).hex()}")
+        #self.logger(f"sending: {bytes(pck).hex()}")
         if self.debugRandom is not None:
             assert(bytes(pck).hex() == self.debugRandom["sending1"])
 
         if self.debugRandom is not None:
-            print("fake result from peer")
+            self.logger("fake result from peer")
             r = bytes.fromhex(self.debugRandom["received1"])
             r = IKEv2(r)
             self.msgid = self.msgid + 1
@@ -179,11 +183,11 @@ class IKEv2WithEap:
             raise IKEv2Exception("Diffie Hellmann mismatch")
     
         self.dhSelected.compute_secret(self.rxKEselected.ke)
-        #print(f'Generated DH shared secret: {self.dhSelected.shared_secret.hex()}')
+        #self.logger(f'Generated DH shared secret: {self.dhSelected.shared_secret.hex()}')
         if self.debugRandom is not None:
             assert(self.dhSelected.shared_secret.hex() == self.debugRandom["DH shared secret"])
     
-        #print(f"got nonce {rxNonce.nonce.hex()}")
+        #self.logger(f"got nonce {rxNonce.nonce.hex()}")
         if self.debugRandom:
             assert(rxNonce.nonce.hex() == self.debugRandom["rxNonce1"])
         self.rxNonce = rxNonce
@@ -197,6 +201,7 @@ class IKEv2WithEap:
    
         exit
         # send AUTH_REQUEST
+        self.logger(f"SA AUTH: identity={self.identity}")
         payload_idi = IKEv2_IDi(IDtype="Email_addr", ID=self.identity)
         payloads = payload_idi
 
@@ -204,14 +209,14 @@ class IKEv2WithEap:
             payloads = await self.doSaAuthWithPayload(payloads)
 
     async def doSaAuthWithPayload(self, payloads):
-        #print(f"Sending {payloads} as id={self.msgid}")
+        self.logger(f"SA AUTH: Sending {payloads} as id={self.msgid}")
         cleartext = bytes(payloads)
     
         # PayloadSK = just ciphertext
         iv = self.crypto_i.cipher.generate_iv()
         if self.debugRandom is not None:
             iv = bytes.fromhex(self.debugRandom[f"iv{self.msgid}"])
-        #print(f"iv={iv.hex()}")
+        #self.logger(f"iv={iv.hex()}")
         padlen = (self.crypto_i.cipher.block_size - (len(cleartext) % self.crypto_i.cipher.block_size) - 1)
         cleartext += b'\x00' * padlen + pack('>B', padlen)
         encrypted = self.crypto_i.cipher.encrypt(self.crypto_i.sk_e, bytes(iv), bytes(cleartext))
@@ -221,7 +226,7 @@ class IKEv2WithEap:
             if pg[1] == type(payloads):
                 payload_type = pg[0]["next_payload"]
         if payload_type is None:
-            #print(type(payloads))
+            #self.logger(type(payloads))
             raise IKEv2Exception("not implemented payload to be sent")
 
         encrypted_payload = IKEv2_Encrypted(next_payload=payload_type, load=iv + encrypted + b'\x00' * self.crypto_i.integrity.hash_size)
@@ -235,7 +240,7 @@ class IKEv2WithEap:
             assert(bytes(pck).hex() == self.debugRandom["sending2"])
         r = await self.sendAndRecv(pck)
     
-        #print(r)
+        self.logger(f"SA AUTH: received {str(r)}")
         if(type(r.payload) != IKEv2_Encrypted):
             raise IKEv2Exception("answer to auth not encrypted")
  
@@ -256,7 +261,7 @@ class IKEv2WithEap:
  
         decoded = (r.payload.guess_payload_class(None))(cleartext)
  
-        #print(decoded)
+        #self.logger(decoded)
         t = decoded
         rxNotify = self.getPayloadByType(t, lambda x: type(x) == IKEv2_Notify, False)
         errors = [ x for x in rxNotify if x.type < 1024]
@@ -269,10 +274,10 @@ class IKEv2WithEap:
             raise IKEv2NoEapPayloadException(ex)
         reply = self.eapHandler.handleFromRemote(rxEAP.load)
         if reply == True:
-            #print("EAP success")
+            self.logger("SA AUTH: EAP success")
             return None
         elif reply == False:
-            #print("EAP failure")
+            self.logger("SA AUTH: EAP failure")
             raise IKEv2Exception("EAP failed")
         
         eapReply = IKEv2_EAP(load = bytes(reply))
@@ -296,7 +301,7 @@ class IKEv2WithEap:
     
         skeyseed = prf.prf(nonce_i + nonce_r, shared_secret)
     
-        #print(f'Generated SKEYSEED: {skeyseed.hex()}')
+        #self.logger(f'Generated SKEYSEED: {skeyseed.hex()}')
         
         # will fail for authenticated encryption (GCM), as it has no extra integ algorithm
         # needs to be checked out
@@ -311,7 +316,7 @@ class IKEv2WithEap:
     
         for keyname in ('sk_d', 'sk_ai', 'sk_ar', 'sk_ei', 'sk_er', 'sk_pi', 'sk_pr'):
             hexkey = getattr(self.ike_sa_keyring, keyname).hex()
-            #print(f'Generated {keyname}: {hexkey}')
+            #self.logger(f'Generated {keyname}: {hexkey}')
 
     def getPayloadByType(self, r, fnFilter, isUnique = True):
         ret = []
@@ -336,25 +341,34 @@ class IKEv2WithEap:
                 future = asyncio.Future(loop=loop)
                 loop.add_reader(nonblocking_sock.fileno(), lambda : future.set_result(True) if not future.done() else None)
                 try:
-                    await asyncio.wait_for(future, timeout=1)
+                    await asyncio.wait_for(future, timeout=0.5)
                 finally:
                     loop.remove_reader(nonblocking_sock.fileno())
 
     async def sendAndRecv(self, pck):
+        # drain socket
+        while True:
+            try:
+                r, sender = self.udpsock.recvfrom(65535)
+            except BlockingIOError:
+                break # drained
+        # send and receive
         r = None
-        for i in range(3):
+        for i in range(20):
             self.udpsock.send(bytes(pck))
             try:
                 r, sender = await self.sock_recvfrom(self.udpsock, 65535)
                 r = IKEv2(r)
+                if r.answers(pck) == 0 or r.id != self.msgid:
+                    # requires init_SPI to be bytes
+                    self.logger(f"answers do not match, ids: {r.id} {self.msgid}")
+                    #raise IKEv2NoAnswerException("answer does not match")
+                    r = None
+                    continue # just ignore it
                 break
             except TimeoutError as ex:
                 pass
         if r is None:
-            raise IKEv2Exception("no answer")
-        if r.answers(pck) == 0 or r.id != self.msgid: # requires init_SPI to be bytes
-            #print(f"ids: {r.id} {self.msgid}")
-            raise IKEv2Exception("answer does not match")
+            raise IKEv2NoAnswerException("no answer")
         self.msgid = self.msgid + 1
         return r
-
