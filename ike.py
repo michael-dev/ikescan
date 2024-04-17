@@ -2,6 +2,7 @@ from collections import namedtuple
 from random import SystemRandom
 from struct import pack, unpack, pack_into
 
+import asyncio
 import functools
 import os
 import socket
@@ -50,10 +51,9 @@ class IKEv2WithEap:
         self.eapHandler = eapHandler
 
         self.udpsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udpsock.settimeout(1) # in seconds
         self.udpsock.connect((server, port))
-    
-        self.sock = SimpleSocket(self.udpsock, IKEv2) 
+        self.udpsock.setblocking(False)
+
         self.myspi = bytes(RandString(8))
         if self.debugRandom is not None:
             self.myspi=bytes.fromhex(self.debugRandom["myspi"])
@@ -64,9 +64,9 @@ class IKEv2WithEap:
         self.dhAlg = dhAlg
         self.identity = identity
 
-        self.dh = { id : MODPDH(id) for id in self.dhAlg }
+        self.dh = { id : MODPDH(id, usePrecomputed=True) for id in self.dhAlg }
         if self.debugRandom is not None:
-            self.dh[2].load(bytes(self.debugRandom["dh"], encoding='utf-8'))
+            self.dh[2].loadGroup(bytes(self.debugRandom["dh"], encoding='utf-8'))
             self.dh[2].loadKey(bytes(self.debugRandom["dhkey"], encoding='utf-8'))
         random = SystemRandom()
         noncelength = random.randrange(16, 256)
@@ -77,10 +77,9 @@ class IKEv2WithEap:
         self.cookie = None
 
     def __del__(self):
-        del(self.sock)
         self.udpsock.close()
 
-    def doSaInit(self):
+    async def doSaInit(self):
         self.msgid = 0
 
         proposals = [ 
@@ -121,7 +120,7 @@ class IKEv2WithEap:
             r = IKEv2(r)
             self.msgid = self.msgid + 1
         else:
-            r = self.sendAndRecv(pck)
+            r = await self.sendAndRecv(pck)
     
         rxMsg = r
         
@@ -157,11 +156,22 @@ class IKEv2WithEap:
             raise IKEv2Exception("More than one proposal")
     
         t = chosen_proposal.trans
-        self.chosenCryptoAlg = self.getPayloadByType(t, lambda x: x.transform_type == 1).transform_id
-        self.chosenCryptoKeyLength = self.getPayloadByType(t, lambda x: x.transform_type == 1).key_length
-        self.chosenAuthAlg = self.getPayloadByType(t, lambda x: x.transform_type == 3).transform_id
-        self.chosenPrfAlg = self.getPayloadByType(t, lambda x: x.transform_type == 2).transform_id
-        self.chosenDhAlg = self.getPayloadByType(t, lambda x: x.transform_type == 4).transform_id
+
+        try:
+            self.chosenCryptoAlg = self.getPayloadByType(t, lambda x: x.transform_type == 1).transform_id
+            self.chosenCryptoKeyLength = self.getPayloadByType(t, lambda x: x.transform_type == 1).key_length
+            self.chosenPrfAlg = self.getPayloadByType(t, lambda x: x.transform_type == 2).transform_id
+            self.chosenDhAlg = self.getPayloadByType(t, lambda x: x.transform_type == 4).transform_id
+        except IKEv2Exception as ex:
+            t.show()
+            raise ex
+
+        try:
+            self.chosenAuthAlg = self.getPayloadByType(t, lambda x: x.transform_type == 3).transform_id
+        except IKEv2Exception as ex:
+            self.chosenAuthAlg = None
+            # authenticated ciphers don't need this
+            pass
 
         self.rxKEselected = rxKE[self.chosenDhAlg]
         self.dhSelected = self.dh[self.chosenDhAlg]
@@ -181,7 +191,7 @@ class IKEv2WithEap:
         # update peer spi (take it from the payload SA if old_sa_d is not none ie. IKE_SA rekey)
         self.peer_spi = rxMsg.resp_SPI
 
-    def doSaAuth(self):
+    async def doSaAuth(self):
         # generate IKE SA key material
         self.generate_ike_sa_key_material()
    
@@ -191,9 +201,9 @@ class IKEv2WithEap:
         payloads = payload_idi
 
         while payloads is not None:
-            payloads = self.doSaAuthWithPayload(payloads)
+            payloads = await self.doSaAuthWithPayload(payloads)
 
-    def doSaAuthWithPayload(self, payloads):
+    async def doSaAuthWithPayload(self, payloads):
         #print(f"Sending {payloads} as id={self.msgid}")
         cleartext = bytes(payloads)
     
@@ -223,7 +233,7 @@ class IKEv2WithEap:
         
         if self.debugRandom is not None:
             assert(bytes(pck).hex() == self.debugRandom["sending2"])
-        r = self.sendAndRecv(pck)
+        r = await self.sendAndRecv(pck)
     
         #print(r)
         if(type(r.payload) != IKEv2_Encrypted):
@@ -281,13 +291,16 @@ class IKEv2WithEap:
         shared_secret=self.dhSelected.shared_secret
 
         prf = Prf(self.chosenPrfAlg)
-        integ = Integrity(self.chosenAuthAlg)
+        integ = Integrity(self.chosenAuthAlg) if self.chosenAuthAlg else None
         cipher = Cipher(self.chosenCryptoAlg, self.chosenCryptoKeyLength)
     
         skeyseed = prf.prf(nonce_i + nonce_r, shared_secret)
     
         #print(f'Generated SKEYSEED: {skeyseed.hex()}')
-    
+        
+        # will fail for authenticated encryption (GCM), as it has no extra integ algorithm
+        # needs to be checked out
+
         keymat = prf.prfplus(skeyseed, nonce_i + nonce_r + spi_i + spi_r,
                              prf.key_size * 3 + integ.key_size * 2 + cipher.key_size * 2)
         sk_d, sk_ai, sk_ar, sk_ei, sk_er, sk_pi, sk_pr = unpack(
@@ -314,12 +327,26 @@ class IKEv2WithEap:
             raise IKEv2Exception(f"IKEv2 payoad type found {len(ret)} times != 1")
         return ret[0]
 
-    def sendAndRecv(self, pck):
+    async def sock_recvfrom(self, nonblocking_sock, *pos, **kw):
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                return nonblocking_sock.recvfrom(*pos, **kw)
+            except BlockingIOError:
+                future = asyncio.Future(loop=loop)
+                loop.add_reader(nonblocking_sock.fileno(), lambda : future.set_result(True) if not future.done() else None)
+                try:
+                    await asyncio.wait_for(future, timeout=1)
+                finally:
+                    loop.remove_reader(nonblocking_sock.fileno())
+
+    async def sendAndRecv(self, pck):
         r = None
         for i in range(3):
-            self.sock.send(pck)
+            self.udpsock.send(bytes(pck))
             try:
-                r = self.sock.recv()
+                r, sender = await self.sock_recvfrom(self.udpsock, 65535)
+                r = IKEv2(r)
                 break
             except TimeoutError as ex:
                 pass

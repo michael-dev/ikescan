@@ -2,6 +2,7 @@ from tls import TLSTester
 from eap import EapWithTls
 from ike import IKEv2WithEap, IKEv2Exception, IKEv2UnsupportedByServer, IKEv2NoEapPayloadException
 
+import asyncio
 import json
 import traceback
 
@@ -12,65 +13,70 @@ def main():
     identity = "michael.braun@kubus-it.de"
     sni="kubus-it.de"
     
-    ret = scan(host, port, identity, sni, lambda msg: print(msg))
+    ret = asyncio.run(scan(host, port, identity, sni, lambda msg: print(msg)), debug=False)
 
     print(json.dumps(ret))
 
-def scan(host, port, identity, sni, logger):
+async def scan(host, port, identity, sni, logger):
     logger('Scanning IKEv2')
 
     # 1. detect diffie-hellmann   
-    supportedDhAlg = []
+    taskList = []
     for dhAlg in IKEv2WithEap.supportedDhAlg():
-        if testProto(host = host, port = port, dhAlg = [ dhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = logger):
-            supportedDhAlg.append(dhAlg)
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ dhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = logger)))
+    supportedDhAlg = set()
+    for f in asyncio.as_completed(taskList):
+        ret = await f
+        if ret:
+            supportedDhAlg.add(ret["chosenDhAlg"])
     if len(supportedDhAlg) == 0:
         raise Exception("No supported DH algorithm found")
-    selectedDhAlg = supportedDhAlg[0]
+    selectedDhAlg = list(supportedDhAlg)[0]
+    supportedDhAlgTxt = [ IKEv2WithEap.algToText(4, algId) for algId in supportedDhAlg ]
+    logger(f"supported dh alg: {supportedDhAlgTxt}")
 
-    # 2. detect cryto alg
-    supportedCryptoAlg = []
+    # 2. detect cryto / prf / auth alg
+    taskList = []
     for cryptoAlg in IKEv2WithEap.cryptoAlgRange:
-        if testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = [ cryptoAlg ], prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = logger):
-            supportedCryptoAlg.append(cryptoAlg)
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = [ cryptoAlg ], prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = logger)))
+    for prfAlg in IKEv2WithEap.prfAlgRange:
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = [ prfAlg ], authAlg = IKEv2WithEap.authAlgRange, logger = logger)))
+    for authAlg in IKEv2WithEap.authAlgRange:
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = [ authAlg ], logger = logger)))
+
+    supportedCryptoAlg = set()
+    supportedPrfAlg = set()
+    supportedAuthAlg = set()
+    for f in asyncio.as_completed(taskList):
+        ret = await f
+        if ret and ret["chosenCryptoAlg"]:
+            supportedCryptoAlg.add((ret["chosenCryptoAlg"], ret["chosenCryptoKeyLength"]))
+        if ret and ret["chosenPrfAlg"]:
+            supportedPrfAlg.add(ret["chosenPrfAlg"])
+        if ret and ret["chosenAuthAlg"]:
+            supportedAuthAlg.add(ret["chosenAuthAlg"])
     if len(supportedCryptoAlg) == 0:
         raise Exception("No supported crypto algorithm found")
-
-    # 3. detect prf alg
-    supportedPrfAlg = []
-    for prfAlg in IKEv2WithEap.prfAlgRange:
-        if testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = [ prfAlg ], authAlg = IKEv2WithEap.authAlgRange, logger = logger):
-            supportedPrfAlg.append(prfAlg)
     if len(supportedPrfAlg) == 0:
         raise Exception("No supported prf algorithm found")
-
-    # 4. detect auth alg
-    supportedAuthAlg = []
-    for authAlg in IKEv2WithEap.authAlgRange:
-        if testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = [ authAlg ], logger = logger):
-            supportedAuthAlg.append(authAlg)
     if len(supportedAuthAlg) == 0:
         raise Exception("No supported auth algorithm found")
-    
-    supportedCryptoAlgTxt = [ IKEv2WithEap.algToText(1, algId) for algId in supportedCryptoAlg ]
+    supportedCryptoAlgTxt = [ IKEv2WithEap.algToText(1, algId[0]) + (f" {algId[1]}" if algId[1] is not None else "") for algId in supportedCryptoAlg ]
     supportedPrfAlgTxt = [ IKEv2WithEap.algToText(2, algId) for algId in supportedPrfAlg ]
     supportedAuthAlgTxt = [ IKEv2WithEap.algToText(3, algId) for algId in supportedAuthAlg ]
-    supportedDhAlgTxt = [ IKEv2WithEap.algToText(4, algId) for algId in supportedDhAlg ]
-    
-    logger(f"supported dh alg: {supportedDhAlgTxt}")
+    logger(f"supported crypto alg: {supportedCryptoAlgTxt}")
     logger(f"supported prf alg: {supportedPrfAlgTxt}")
     logger(f"supported auth alg: {supportedAuthAlgTxt}")
-    logger(f"supported crypto alg: {supportedCryptoAlgTxt}")
 
     # 5. detect EAP-TLS version
     supportedTlsVersion = None
-    supportedCryptoAlgForIkeAuth = [ algId for algId in supportedCryptoAlg if algId in IKEv2WithEap.supportedCryptoAlg() ]
+    supportedCryptoAlgForIkeAuth = [ algId[0] for algId in supportedCryptoAlg if algId[0] in IKEv2WithEap.supportedCryptoAlg() ]
     if len(supportedCryptoAlgForIkeAuth) == 0:
         logger("cannot test EAP - no supported crypto cipher found")
     else:
         supportedTlsVersion = []
         for tlsProto in TLSTester.supportedProtos():
-            ret = testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)
+            ret = await testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)
             if ret and "eapTlsVersion" in ret and ret["eapTlsVersion"]:
                 supportedTlsVersion.append(ret["eapTlsVersion"])
 
@@ -90,7 +96,7 @@ def scan(host, port, identity, sni, logger):
     return ret
 
 
-def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, servername = None, tlsVersion = None, logger = lambda msg: print(msg)):
+async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, servername = None, tlsVersion = None, logger = lambda msg: print(msg)):
 
     if identity is not None:
         tlsHandler = TLSTester(proto=tlsVersion,servername=servername)
@@ -101,7 +107,7 @@ def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, se
     ikeHandler = IKEv2WithEap(eapHandler, host, port, cryptoAlg, prfAlg, authAlg, dhAlg, identity, None) # optionally pass debugRandom
 
     try:
-        ikeHandler.doSaInit()
+        await ikeHandler.doSaInit()
         result = {
             "chosenCryptoAlg": ikeHandler.chosenCryptoAlg,
             "chosenCryptoKeyLength": ikeHandler.chosenCryptoKeyLength,
@@ -112,7 +118,7 @@ def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, se
 
         if eapHandler is not None:
             try:
-                ikeHandler.doSaAuth()
+                await ikeHandler.doSaAuth()
             except IKEv2NoEapPayloadException:
                 pass
             except IKEv2Exception as ex:
@@ -133,3 +139,6 @@ def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, se
     del(ikeHandler)
 
     return result
+
+if __name__ == '__main__':
+    main()
