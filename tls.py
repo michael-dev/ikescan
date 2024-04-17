@@ -8,8 +8,11 @@ from scapy.layers.tls.record_sslv2 import SSLv2
 from scapy.layers.tls.record_tls13 import TLS13
 from scapy.utils import randstring
 
+
+from debug import Debug
+
 class TLSTester:
-    def __init__(self, proto="tls10", compression = False, ciphers = None, servername = None):
+    def __init__(self, proto="tls10", compression = False, ciphers = None, servername = None, debug = Debug()):
         self.proto = proto
         self.compression = compression
         self.ciphers = ciphers
@@ -19,16 +22,22 @@ class TLSTester:
         self.selectedProto = None
         self.success = False
         self.servercerts = []
+        self.debug = debug
+        self.msgid = 0
 
     @classmethod
     def supportedProtos(cls):
         return _tls_version_options.keys()
 
     def handleFromRemote(self, data):
+        self.debug.setOrCheck(f"tlsIn{self.msgid}", data)
         if data is None:
             ret = self.tlsInitialHandshake()
         else:
             ret = self.tlsReply(data)
+
+        self.debug.setOrCheck(f"tlsOut{self.msgid}", ret)
+        self.msgid = self.msgid + 1
 
         #if self.proto == "sslv2":
         #    tmp = SSLv2(ret)

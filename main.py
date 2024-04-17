@@ -1,6 +1,7 @@
-from tls import TLSTester
+from debug import Debug
 from eap import EapWithTls
 from ike import IKEv2WithEap, IKEv2Exception, IKEv2UnsupportedByServer, IKEv2NoEapPayloadException, IKEv2NoAnswerException
+from tls import TLSTester
 
 import asyncio
 import json
@@ -17,12 +18,14 @@ def main():
 
     print(json.dumps(ret))
 
-async def scan(host, port, identity, sni, logger):
+async def scan(host, port, identity, sni, logger, restrictDh = None):
     logger('Scanning IKEv2')
 
     # 1. detect diffie-hellmann   
     taskList = []
     for dhAlg in IKEv2WithEap.supportedDhAlg():
+        if restrictDh and dhAlg not in restrictDh:
+            continue
         taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ dhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg, dhAlg=dhAlg: logger(f"DH({dhAlg}): {msg}"))))
     supportedDhAlg = set()
     for f in asyncio.as_completed(taskList):
@@ -103,13 +106,15 @@ async def scan(host, port, identity, sni, logger):
 async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = None, servername = None, tlsVersion = None, logger = lambda msg: print(msg)):
     logger(f"testProto({host}:{port}, dh={dhAlg}, crypto={cryptoAlg}, prf={prfAlg}, auth={authAlg}, identity={identity}, servername={servername}, tlsVersion={tlsVersion})")
 
+    debug = Debug(logger)
+
     if identity is not None:
-        tlsHandler = TLSTester(proto=tlsVersion,servername=servername)
+        tlsHandler = TLSTester(proto=tlsVersion,servername=servername,debug=debug)
         eapHandler = EapWithTls(tlsHandler, identity)
     else:
         eapHandler = None
 
-    ikeHandler = IKEv2WithEap(eapHandler, host, port, cryptoAlg, prfAlg, authAlg, dhAlg, identity, None, logger = logger) # optionally pass debugRandom
+    ikeHandler = IKEv2WithEap(eapHandler, host, port, cryptoAlg, prfAlg, authAlg, dhAlg, identity, debug, logger = logger)
 
     try:
         await ikeHandler.doSaInit()
@@ -145,6 +150,7 @@ async def testProto(host, port, dhAlg, cryptoAlg, prfAlg, authAlg, identity = No
         logger(str(ex) + "\n" + "\n".join(traceback.format_exception(ex)))
         return False
     finally:
+        logger(f"testProto debug output: {debug.toJson()}")
         del(ikeHandler)
 
     return result

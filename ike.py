@@ -14,6 +14,7 @@ from scapy.supersocket import SimpleSocket
 import scapy
 
 from crypto import MODPDH, Crypto, Prf, Integrity, Cipher
+from debug import Debug
 
 Keyring = namedtuple('Keyring', ['sk_d', 'sk_ai', 'sk_ar', 'sk_ei', 'sk_er', 'sk_pi', 'sk_pr'])
 
@@ -48,9 +49,9 @@ class IKEv2WithEap:
     @classmethod
     def algToText(cls, typeId, value):
         return IKEv2AttributeTypes[typeId][1][value]
-
-    def __init__(self, eapHandler, server = "vpn.example.org", port = 500, cryptoAlg = [ 12 ], prfAlg = [2], authAlg =[2], dhAlg =[2], identity = "example@example.org", debugRandom = None, logger = lambda msg: print(msg)):
-        self.debugRandom = debugRandom
+   
+    def __init__(self, eapHandler, server = "vpn.example.org", port = 500, cryptoAlg = [ 12 ], prfAlg = [2], authAlg =[2], dhAlg =[2], identity = "example@example.org", debug = Debug(), logger = lambda msg: print(msg)):
+        self.debug = debug
         self.logger = logger
         self.eapHandler = eapHandler
 
@@ -58,9 +59,7 @@ class IKEv2WithEap:
         self.udpsock.connect((server, port))
         self.udpsock.setblocking(False)
 
-        self.myspi = bytes(RandString(8))
-        if self.debugRandom is not None:
-            self.myspi=bytes.fromhex(self.debugRandom["myspi"])
+        self.myspi = self.debug.setOrGet('myspi', bytes(RandString(8)))
 
         self.cryptoAlg = cryptoAlg
         self.prfAlg = prfAlg
@@ -69,14 +68,14 @@ class IKEv2WithEap:
         self.identity = identity
 
         self.dh = { id : MODPDH(id, usePrecomputed=True) for id in self.dhAlg }
-        if self.debugRandom is not None:
-            self.dh[2].loadGroup(bytes(self.debugRandom["dh"], encoding='utf-8'))
-            self.dh[2].loadKey(bytes(self.debugRandom["dhkey"], encoding='utf-8'))
+        for id in self.dh.keys():
+            oldKey = self.debug.setOrGet(f"dh-priv{id}", self.dh[id].exportKey(), valueType='byte.utf8', noneIfNew = True)
+            if oldKey:
+                self.dh[id].loadKey(oldKey)
+
         random = SystemRandom()
         noncelength = random.randrange(16, 256)
-        self.nonce = os.urandom(noncelength)
-        if self.debugRandom is not None:
-            self.nonce=bytes.fromhex(self.debugRandom["nonce"])
+        self.nonce = self.debug.setOrGet('nonce', os.urandom(noncelength))
 
         self.cookie = None
 
@@ -105,26 +104,12 @@ class IKEv2WithEap:
             #self.logger('Without cookie')
             pass
         pck = pck / IKEv2_SA(prop= IKEv2_Proposal(trans_nb = len(proposals), trans = proposals_layer ))
-        #self.logger(self.dh)
         for id, dhv in self.dh.items():
-            #self.logger(f"group = {dhv.group}, ke = {dhv.public_key.hex()}")
-            if self.debugRandom is not None:
-                assert(dhv.group == self.debugRandom["dhGroup"])
-                assert(dhv.public_key.hex() == self.debugRandom["dhKe"])
+            self.debug.setOrCheck(f"dh-public{id}", dhv.public_key)
             pck = pck / IKEv2_KE(group=dhv.group, ke = dhv.public_key)
         pck = pck / IKEv2_Nonce(nonce=self.nonce)
         
-        #self.logger(f"sending: {bytes(pck).hex()}")
-        if self.debugRandom is not None:
-            assert(bytes(pck).hex() == self.debugRandom["sending1"])
-
-        if self.debugRandom is not None:
-            self.logger("fake result from peer")
-            r = bytes.fromhex(self.debugRandom["received1"])
-            r = IKEv2(r)
-            self.msgid = self.msgid + 1
-        else:
-            r = await self.sendAndRecv(pck)
+        r = await self.sendAndRecv(pck)
     
         rxMsg = r
         
@@ -170,12 +155,18 @@ class IKEv2WithEap:
             t.show()
             raise ex
 
+        self.debug.setOrCheck("chosenCryptoAlg", self.chosenCryptoAlg, 'int')
+        self.debug.setOrCheck("chosenPrfAlg", self.chosenPrfAlg, 'int')
+        self.debug.setOrCheck("chosenDhAlg", self.chosenDhAlg, 'int')
+
         try:
             self.chosenAuthAlg = self.getPayloadByType(t, lambda x: x.transform_type == 3).transform_id
         except IKEv2Exception as ex:
             self.chosenAuthAlg = None
             # authenticated ciphers don't need this
             pass
+        
+        self.debug.setOrCheck("chosenAuthAlg", self.chosenAuthAlg, 'int')
 
         self.rxKEselected = rxKE[self.chosenDhAlg]
         self.dhSelected = self.dh[self.chosenDhAlg]
@@ -183,13 +174,11 @@ class IKEv2WithEap:
             raise IKEv2Exception("Diffie Hellmann mismatch")
     
         self.dhSelected.compute_secret(self.rxKEselected.ke)
-        #self.logger(f'Generated DH shared secret: {self.dhSelected.shared_secret.hex()}')
-        if self.debugRandom is not None:
-            assert(self.dhSelected.shared_secret.hex() == self.debugRandom["DH shared secret"])
+        self.logger(f'Generated DH shared secret: {self.dhSelected.shared_secret.hex()}')
+        self.debug.setOrCheck('sharedSecret', self.dhSelected.shared_secret)
     
         #self.logger(f"got nonce {rxNonce.nonce.hex()}")
-        if self.debugRandom:
-            assert(rxNonce.nonce.hex() == self.debugRandom["rxNonce1"])
+        self.debug.setOrCheck('rxNonce', rxNonce.nonce)
         self.rxNonce = rxNonce
 
         # update peer spi (take it from the payload SA if old_sa_d is not none ie. IKE_SA rekey)
@@ -213,9 +202,7 @@ class IKEv2WithEap:
         cleartext = bytes(payloads)
     
         # PayloadSK = just ciphertext
-        iv = self.crypto_i.cipher.generate_iv()
-        if self.debugRandom is not None:
-            iv = bytes.fromhex(self.debugRandom[f"iv{self.msgid}"])
+        iv = self.debug.setOrGet(f"saAuthIv{self.msgid}", self.crypto_i.cipher.generate_iv())
         #self.logger(f"iv={iv.hex()}")
         padlen = (self.crypto_i.cipher.block_size - (len(cleartext) % self.crypto_i.cipher.block_size) - 1)
         cleartext += b'\x00' * padlen + pack('>B', padlen)
@@ -236,8 +223,6 @@ class IKEv2WithEap:
         pack_into(f'>{len(checksum)}s', data, len(data) - len(checksum), checksum)
         pck = IKEv2(data)
         
-        if self.debugRandom is not None:
-            assert(bytes(pck).hex() == self.debugRandom["sending2"])
         r = await self.sendAndRecv(pck)
     
         self.logger(f"SA AUTH: received {str(r)}")
@@ -346,6 +331,12 @@ class IKEv2WithEap:
                     loop.remove_reader(nonblocking_sock.fileno())
 
     async def sendAndRecv(self, pck):
+        if self.debug.setOrCheck(f"out{self.msgid}", bytes(pck)):
+            self.logger("fake result from peer")
+            r = self.getDebug(f"in{self.msgid}")
+            self.msgid = self.msgid + 1
+            return IKEv2(r)
+
         # drain socket
         while True:
             try:
@@ -357,8 +348,8 @@ class IKEv2WithEap:
         for i in range(20):
             self.udpsock.send(bytes(pck))
             try:
-                r, sender = await self.sock_recvfrom(self.udpsock, 65535)
-                r = IKEv2(r)
+                rbytes, sender = await self.sock_recvfrom(self.udpsock, 65535)
+                r = IKEv2(rbytes)
                 if r.answers(pck) == 0 or r.id != self.msgid:
                     # requires init_SPI to be bytes
                     self.logger(f"answers do not match, ids: {r.id} {self.msgid}")
@@ -371,5 +362,6 @@ class IKEv2WithEap:
                 pass
         if r is None:
             raise IKEv2NoAnswerException("no answer")
+        self.debug.setOrCheck(f"in{self.msgid}", rbytes)
         self.msgid = self.msgid + 1
         return r
