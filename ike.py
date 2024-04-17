@@ -301,7 +301,7 @@ class IKEv2WithEap:
     
         skeyseed = prf.prf(nonce_i + nonce_r, shared_secret)
     
-        #self.logger(f'Generated SKEYSEED: {skeyseed.hex()}')
+        self.logger(f'Generated SKEYSEED: {skeyseed.hex()}')
         
         # will fail for authenticated encryption (GCM), as it has no extra integ algorithm
         # needs to be checked out
@@ -316,7 +316,7 @@ class IKEv2WithEap:
     
         for keyname in ('sk_d', 'sk_ai', 'sk_ar', 'sk_ei', 'sk_er', 'sk_pi', 'sk_pr'):
             hexkey = getattr(self.ike_sa_keyring, keyname).hex()
-            #self.logger(f'Generated {keyname}: {hexkey}')
+            self.logger(f'Generated {keyname}: {hexkey}')
 
     def getPayloadByType(self, r, fnFilter, isUnique = True):
         ret = []
