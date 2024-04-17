@@ -137,7 +137,7 @@ class IKEv2WithEap:
                 raise IKEv2Exception("SA INIT cookie changed")
             self.cookie, = rxCookie
             self.cookie = IKEv2_Notify(type = self.cookie.type, proto = self.cookie.proto, notify = self.cookie.notify)
-            return self.doSaInit()
+            return await self.doSaInit()
 
         rxSA = self.getPayloadByType(rxMsg, lambda x: type(x) == IKEv2_SA)
         rxNonce = self.getPayloadByType(rxMsg, lambda x: type(x) == IKEv2_Nonce)
