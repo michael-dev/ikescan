@@ -74,11 +74,14 @@ async def scan(host, port, identity, sni, logger):
     if len(supportedCryptoAlgForIkeAuth) == 0:
         logger("cannot test EAP - no supported crypto cipher found")
     else:
-        supportedTlsVersion = []
+        taskList = []
         for tlsProto in TLSTester.supportedProtos():
-            ret = await testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)
+            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = logger)))
+        supportedTlsVersion = set()
+        for f in asyncio.as_completed(taskList):
+            ret = await f
             if ret and "eapTlsVersion" in ret and ret["eapTlsVersion"]:
-                supportedTlsVersion.append(ret["eapTlsVersion"])
+                supportedTlsVersion.add(ret["eapTlsVersion"])
 
     logger(f"supported tls version: {supportedTlsVersion}")
 
@@ -89,7 +92,7 @@ async def scan(host, port, identity, sni, logger):
         "supported prf alg": supportedPrfAlgTxt,
         "supported auth alg": supportedAuthAlgTxt,
         "supported crypto alg": supportedCryptoAlgTxt,
-        "supported tls version": supportedTlsVersion,
+        "supported tls version": list(supportedTlsVersion),
     }
     
     
