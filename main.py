@@ -18,7 +18,7 @@ def main():
 
     print(json.dumps(ret))
 
-async def scan(host, port, identity, sni, logger, restrictDh = None):
+async def scan(host, port, identity, sni, logger, restrictDh = None, restrictCrypto = None, restrictPrf = None, restrictAuth = None):
     logger('Scanning IKEv2')
 
     # 1. detect diffie-hellmann   
@@ -41,10 +41,16 @@ async def scan(host, port, identity, sni, logger, restrictDh = None):
     # 2. detect cryto / prf / auth alg
     taskList = []
     for cryptoAlg in IKEv2WithEap.cryptoAlgRange:
+        if restrictCrypto and cryptoAlg not in restrictCrypto:
+            continue
         taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = [ cryptoAlg ], prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg, cryptoAlg=cryptoAlg: logger(f"Crypto({cryptoAlg}): {msg}"))))
     for prfAlg in IKEv2WithEap.prfAlgRange:
+        if restrictPrf and prfAlg not in restrictPrf:
+            continue
         taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = [ prfAlg ], authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg, prfAlg=prfAlg: logger(f"Prf({prfAlg}): {msg}"))))
     for authAlg in IKEv2WithEap.authAlgRange:
+        if restrictAuth and authAlg not in restrictAuth:
+            continue
         taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = [ authAlg ], logger = lambda msg, authAlg=authAlg: logger(f"Auth({authAlg}): {msg}"))))
 
     supportedCryptoAlg = set()
