@@ -1,6 +1,6 @@
 from tls import TLSTester
 from eap import EapWithTls
-from ike import IKEv2WithEap, IKEv2Exception, IKEv2UnsupportedByServer, IKEv2NoEapPayloadException
+from ike import IKEv2WithEap, IKEv2Exception, IKEv2UnsupportedByServer, IKEv2NoEapPayloadException, IKEv2NoAnswerException
 
 import asyncio
 import json
