@@ -23,7 +23,7 @@ async def scan(host, port, identity, sni, logger):
     # 1. detect diffie-hellmann   
     taskList = []
     for dhAlg in IKEv2WithEap.supportedDhAlg():
-        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ dhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg: logger(f"DH({dhAlg}): {msg}"))))
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ dhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg, dhAlg=dhAlg: logger(f"DH({dhAlg}): {msg}"))))
     supportedDhAlg = set()
     for f in asyncio.as_completed(taskList):
         ret = await f
@@ -38,11 +38,11 @@ async def scan(host, port, identity, sni, logger):
     # 2. detect cryto / prf / auth alg
     taskList = []
     for cryptoAlg in IKEv2WithEap.cryptoAlgRange:
-        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = [ cryptoAlg ], prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg: logger(f"Crypto({cryptoAlg}): {msg}"))))
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = [ cryptoAlg ], prfAlg = IKEv2WithEap.prfAlgRange, authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg, cryptoAlg=cryptoAlg: logger(f"Crypto({cryptoAlg}): {msg}"))))
     for prfAlg in IKEv2WithEap.prfAlgRange:
-        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = [ prfAlg ], authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg: logger(f"Prf({prfAlg}): {msg}"))))
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = [ prfAlg ], authAlg = IKEv2WithEap.authAlgRange, logger = lambda msg, prfAlg=prfAlg: logger(f"Prf({prfAlg}): {msg}"))))
     for authAlg in IKEv2WithEap.authAlgRange:
-        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = [ authAlg ], logger = lambda msg: logger(f"Auth({authAlg}): {msg}"))))
+        taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = IKEv2WithEap.cryptoAlgRange, prfAlg = IKEv2WithEap.prfAlgRange, authAlg = [ authAlg ], logger = lambda msg, authAlg=authAlg: logger(f"Auth({authAlg}): {msg}"))))
 
     supportedCryptoAlg = set()
     supportedPrfAlg = set()
@@ -77,7 +77,7 @@ async def scan(host, port, identity, sni, logger):
         logger(f"testing EAP-TLS with identity={identity} and servername={sni} and tlsVersion={TLSTester.supportedProtos()} and cryptoAlg={supportedCryptoAlgForIkeAuth}")
         taskList = []
         for tlsProto in TLSTester.supportedProtos():
-            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = lambda msg: logger(f"TLS({tlsProto}): {msg}"))))
+            taskList.append(asyncio.create_task(testProto(host = host, port = port, dhAlg = [ selectedDhAlg ], cryptoAlg = supportedCryptoAlgForIkeAuth, prfAlg = supportedPrfAlg, authAlg = supportedAuthAlg, identity = identity, servername = sni, tlsVersion = tlsProto, logger = lambda msg, tlsProto=tlsProto: logger(f"TLS({tlsProto}): {msg}"))))
         supportedTlsVersion = set()
         for f in asyncio.as_completed(taskList):
             ret = await f
