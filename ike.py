@@ -78,6 +78,7 @@ class IKEv2WithEap:
         self.nonce = self.debug.setOrGet('nonce', os.urandom(noncelength))
 
         self.cookie = None
+        self.debugMsgCounter = 0
 
     def __del__(self):
         self.udpsock.close()
@@ -331,12 +332,13 @@ class IKEv2WithEap:
                     loop.remove_reader(nonblocking_sock.fileno())
 
     async def sendAndRecv(self, pck):
-        if self.debug.setOrCheck(f"out{self.msgid}", bytes(pck)):
+        if self.debug.setOrCheck(f"out{self.debugMsgCounter}", bytes(pck)):
             self.logger("fake result from peer")
-            r = self.debug.getOrDefault(f"in{self.msgid}")
+            r = self.debug.getOrDefault(f"in{self.debugMsgCounter}")
             if r is None:
                 raise IKEv2NoAnswerException("no answer")
             self.msgid = self.msgid + 1
+            self.debugMsgCounter = self.debugMsgCounter + 1
             return IKEv2(r)
 
         # drain socket
@@ -364,6 +366,7 @@ class IKEv2WithEap:
                 pass
         if r is None:
             raise IKEv2NoAnswerException("no answer")
-        self.debug.setOrCheck(f"in{self.msgid}", rbytes)
+        self.debug.setOrCheck(f"in{self.debugMsgCounter}", rbytes)
         self.msgid = self.msgid + 1
+        self.debugMsgCounter = self.debugMsgCounter + 1
         return r
